@@ -22,19 +22,15 @@ export async function POST(req: NextRequest) {
       body: sttFormData,
     });
 
-    if (!sttResponse.ok) {
-      const errorDetail = await sttResponse.text();
-      throw new Error(`STT 실패: ${errorDetail}`);
-    }
+    if (!sttResponse.ok) throw new Error("음성 인식(STT)에 실패했습니다.");
+    
     const { text: originalText } = await sttResponse.json();
-    console.log("전사된 텍스트:", originalText); // 디버깅용
 
     // 2. 무료 번역
     const translationRes = await translate(originalText, { to: targetLang });
     const translatedText = translationRes.text;
-    console.log("번역된 텍스트:", translatedText); // 디버깅용
 
-   // 3. ElevenLabs TTS (무료 계정 전용 기본 목소리 ID로 교체)
+    // 3. ElevenLabs TTS
     const ttsResponse = await fetch('https://api.elevenlabs.io/v1/text-to-speech/CwhRBWXzGAHq8TQ4Fs17', { 
       method: 'POST',
       headers: {
@@ -43,20 +39,15 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         text: translatedText,
-        model_id: 'eleven_multilingual_v2', // 다국어 지원 (일본어 번역에 필수)
-        voice_settings: { 
-          stability: 0.5, 
-          similarity_boost: 0.75 
-        },
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
       }),
     });
+
     if (!ttsResponse.ok) {
       const errorBody = await ttsResponse.json();
-      console.error("ElevenLabs TTS 에러 상세:", errorBody);
-      
-      // 만약 'quota_exceeded'가 포함되어 있다면 한도 초과입니다.
       const message = errorBody.detail?.status === 'quota_exceeded' 
-        ? "ElevenLabs 무료 한도(글자 수)를 모두 사용했습니다." 
+        ? "API 사용 한도를 초과했습니다." 
         : "음성 합성 중 오류가 발생했습니다.";
       throw new Error(message);
     }
@@ -68,7 +59,8 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('전체 에러 로그:', error);
+    // 서버 터미널에는 로그를 남기되, 클라이언트에는 요약된 메시지만 전달
+    console.error('Dubbing Route Error:', error.message);
     return NextResponse.json({ error: error.message || "알 수 없는 오류 발생" }, { status: 500 });
   }
 }
