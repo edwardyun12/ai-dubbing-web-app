@@ -65,12 +65,17 @@ export default function DubbingPage() {
             <select 
               value={targetLang}
               onChange={(e) => setTargetLang(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-white text-black border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="en">영어 (English)</option>
               <option value="ja">일본어 (Japanese)</option>
               <option value="ko">한국어 (Korean)</option>
               <option value="es">스페인어 (Spanish)</option>
+              <option value="fr">프랑스어 (French)</option>
+              <option value="de">독일어 (German)</option>
+              <option value="zh-CN">중국어 (Chinese Simplified)</option>
+              <option value="it">이탈리아어 (Italian)</option>
+              <option value="pt">포르투갈어 (Portuguese)</option>
             </select>
           </div>
 
