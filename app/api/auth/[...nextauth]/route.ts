@@ -12,7 +12,8 @@ function getDb() {
     url,
     authToken: process.env.TURSO_AUTH_TOKEN || "",
   });
-}
+} 
+
 
 const handler = NextAuth({
   providers: [
