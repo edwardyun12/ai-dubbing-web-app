@@ -23,8 +23,9 @@
 
 1. 업로드된 파일에서 음성 추출 및 전사 — **ElevenLabs API**
 2. 전사된 텍스트를 타겟 언어로 번역 — **Google Translate API**
-3. 번역된 텍스트를 타겟 언어 음성으로 합성 — **ElevenLabs API**
-4. 더빙된 결과물 재생 및 다운로드 제공
+3. 타겟 언어에 적합한 AI 목소리 선택 및 설정 — **ElevenLabs Voice Library**
+4. 번역된 텍스트를 타겟 언어 음성으로 합성 — **ElevenLabs API**
+5. 더빙된 결과물 재생 및 다운로드 제공
 
 ---
 
@@ -32,7 +33,7 @@
 
 ### 🔊 음성 더빙
 - 오디오 또는 비디오 파일 업로드
-- 타겟 언어 선택
+- 타겟 언어 및 목소리 타입 선택 (남성/여성, 차분한/활기찬 등 다양한 AI 음성 지원)
 - 더빙된 오디오/비디오 파일 출력
 - 결과물 재생 및 다운로드
 
@@ -77,8 +78,8 @@
 ### 2. 저장소 클론
 
 ```bash
-git clone https://github.com/your-username/your-repo-name.git
-cd your-repo-name
+git clone https://github.com/edwardyun12/ai-dubbing-web-app.git
+cd ai-dubbing-web-app
 ```
 
 ### 3. 환경 변수 설정
@@ -116,7 +117,7 @@ npm run dev
 
 ### 활용한 에이전트
 - **Claude Code** — 프로젝트의 전체적인 코드 베이스 작성 및 기능 구현을 담당했습니다. 특히 복잡한 비즈니스 로직 설계와 README.md의 초기 초안 작성을 수행했습니다.
-- **Google Gemini** — 구현된 코드의 세부 디버깅, 문서화 보완, 그리고 그 외 전반적인 최적화 작업을 수행했습니다.  에이전트 간의 교차 검증을 통해 코드의 안정성을 높였습니다.
+- **Google Gemini, AntiGravity** — 구현된 코드의 세부 디버깅, 문서화 보완, 그리고 그 외 전반적인 최적화 작업을 수행했습니다.  에이전트 간의 교차 검증을 통해 코드의 안정성을 높였습니다.
 
 ### 활용 노하우
  
