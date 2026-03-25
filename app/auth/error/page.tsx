@@ -25,20 +25,20 @@ function ErrorContent() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">{title}</h1>
-      <p className="text-gray-600 mb-8">{description}</p>
+      <h1 className="text-3xl font-black uppercase tracking-tighter mb-4">{title}</h1>
+      <p className="text-sm font-medium leading-relaxed text-gray-600 mb-8">{description}</p>
       
-      <div className="space-y-3">
+      <div className="space-y-4">
         {/* 사용자를 메인 화면으로 안전하게 돌려보내는 링크 버튼 */}
         <Link 
           href="/"
-          className="block w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-md active:scale-95"
+          className="block w-full py-4 bg-black text-white font-black text-sm tracking-widest uppercase rounded-full hover:bg-gray-800 transition-all active:scale-95 shadow-xl"
         >
-          홈으로 돌아가기
+          RETURN TO HOME
         </Link>
         
         {/* 개발 시 디버깅을 위해 에러 코드를 하단에 작게 표시합니다. */}
-        <p className="text-xs text-gray-400 font-mono">Error Code: {error || 'Unknown'}</p>
+        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter mt-4">* ERROR CODE: {error || 'UNKNOWN'}</p>
       </div>
     </>
   );
@@ -50,14 +50,14 @@ function ErrorContent() {
  */
 export default function AuthErrorPage() {
   return (
-    <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+    <main className="min-h-screen bg-white flex items-center justify-center p-6 md:p-12 text-black">
       {/* 화이트박스 레이아웃: 사용자에게 친숙한 카드 형태 UI */}
-      <div className="max-w-md w-full bg-white border border-gray-200 p-10 rounded-3xl shadow-sm text-center">
+      <div className="max-w-md w-full bg-white border-2 border-black p-10 rounded-2xl shadow-2xl text-center">
         
         {/* 경고 아이콘 영역: 직관적으로 오류가 발생했음을 알립니다. */}
         <div className="mb-6 flex justify-center">
-          <div className="bg-red-50 p-4 rounded-full">
-            <svg className="w-12 h-12 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="bg-black text-white p-4 rounded-full">
+            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
@@ -69,7 +69,7 @@ export default function AuthErrorPage() {
          * 빌드 시점에 오류가 발생하거나 클라이언트 사이드 렌더링에 문제가 생길 수 있습니다.
          * 이를 방지하기 위해 반드시 Suspense로 감싸주어야 합니다.
          */}
-        <Suspense fallback={<p className="text-gray-400">데이터를 불러오는 중...</p>}>
+        <Suspense fallback={<p className="text-xs font-bold uppercase tracking-tighter text-gray-400">데이터를 불러오는 중...</p>}>
           <ErrorContent />
         </Suspense>
       </div>
