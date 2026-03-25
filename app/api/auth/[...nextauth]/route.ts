@@ -14,7 +14,6 @@ function getDb() {
   });
 } 
 
-
 const handler = NextAuth({
   providers: [
     GoogleProvider({
