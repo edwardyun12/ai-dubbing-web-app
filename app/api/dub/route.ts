@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import translate from 'google-translate-api-next';
 
+// 1. 빌드 타임 에러 방지
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -11,6 +14,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "파일이 업로드되지 않았습니다." }, { status: 400 });
     }
 
+    // 2. API Key 체크 (느낌표 제거 및 안전한 호출)
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      throw new Error("서버 설정 오류: API Key가 없습니다.");
+    }
+
     // 1. ElevenLabs STT
     const sttFormData = new FormData();
     sttFormData.append('file', file);
@@ -18,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     const sttResponse = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
       method: 'POST',
-      headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! },
+      headers: { 'xi-api-key': apiKey }, // ! 대신 변수 사용
       body: sttFormData,
     });
 
@@ -35,7 +44,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'xi-api-key': process.env.ELEVENLABS_API_KEY!,
+        'xi-api-key': apiKey, // ! 대신 변수 사용
       },
       body: JSON.stringify({
         text: translatedText,
@@ -59,7 +68,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: any) {
-    // 서버 터미널에는 로그를 남기되, 클라이언트에는 요약된 메시지만 전달
     console.error('Dubbing Route Error:', error.message);
     return NextResponse.json({ error: error.message || "알 수 없는 오류 발생" }, { status: 500 });
   }

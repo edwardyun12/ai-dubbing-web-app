@@ -2,27 +2,31 @@ import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@libsql/client";
 
-// [중요] 빌드 시점에 이 API를 미리 만들지 않도록 강제합니다.
 export const dynamic = "force-dynamic";
 
-// 환경 변수가 없을 경우를 대비해 가짜 URL이라도 넣어 빌드 중단을 막습니다.
-const db = createClient({
-  url: process.env.TURSO_DATABASE_URL || "libsql://placeholder.turso.io",
-  authToken: process.env.TURSO_AUTH_TOKEN || "",
-});
+// ✅ 함수로 감싸서 실제 호출 시점에 생성
+function getDb() {
+  const url = process.env.TURSO_DATABASE_URL;
+  if (!url) throw new Error("TURSO_DATABASE_URL is not defined");
+  return createClient({
+    url,
+    authToken: process.env.TURSO_AUTH_TOKEN || "",
+  });
+}
 
 const handler = NextAuth({
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     }),
   ],
   secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
     async signIn({ user }) {
-      if (!user?.email || !process.env.TURSO_DATABASE_URL) return false;
+      if (!user?.email) return false;
       try {
+        const db = getDb(); // ✅ 여기서 생성
         const result = await db.execute({
           sql: "SELECT 1 FROM whitelist WHERE email = ? LIMIT 1",
           args: [user.email],
@@ -34,7 +38,7 @@ const handler = NextAuth({
       }
     },
   },
-  pages: { error: '/auth/error' },
+  pages: { error: "/auth/error" },
 });
 
 export { handler as GET, handler as POST };
