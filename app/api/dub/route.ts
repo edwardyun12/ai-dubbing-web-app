@@ -9,7 +9,8 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const targetLang = formData.get('targetLang') as string;
-
+ 
+    
     if (!file) {
       return NextResponse.json({ error: "파일이 업로드되지 않았습니다." }, { status: 400 });
     }
