@@ -9,6 +9,7 @@ export default function DubbingPage() {
   const { data: session } = useSession();
   const [file, setFile] = useState<File | null>(null);
   const [targetLang, setTargetLang] = useState('en');
+  const [voiceId, setVoiceId] = useState('CwhRBWXzGAHq8TQ4Fs17');
   const [saveMode, setSaveMode] = useState<'mp4' | 'mp3'>('mp4');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,6 +49,7 @@ export default function DubbingPage() {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('targetLang', targetLang);
+    formData.append('voiceId', voiceId);
 
     try {
       const res = await fetch('/api/dub', { method: 'POST', body: formData });
@@ -182,6 +184,23 @@ export default function DubbingPage() {
                 <option value="th">태국어 (Thai)</option>
                 <option value="id">인도네시아어 (Indonesian)</option>
                 <option value="hi">힌디어 (Hindi)</option>
+              </select>
+            </div>
+
+            {/* 4. 목소리 선택 섹션 */}
+            <div className="space-y-3">
+              <label className="text-xs font-black uppercase tracking-widest">04. Voice Type</label>
+              <select 
+                value={voiceId} 
+                onChange={(e) => setVoiceId(e.target.value)} 
+                className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold outline-none bg-white appearance-none cursor-pointer focus:ring-2 focus:ring-black"
+              >
+                <option value="CwhRBWXzGAHq8TQ4Fs17">Roger (남성 - 신뢰감 있는 기본 음성)</option>
+                <option value="FGY2WhTYpPnrIDTdsKH5">Lara (여성 - 활기찬)</option>
+                <option value="IKne3meq5aSn9XLyUdCD">Charlie (남성 - 차분한)</option>
+                <option value="JBFqnCBsd6RMkjVDRZzb">George (남성 - 따뜻한)</option>
+                <option value="Xb7hH8MSUJpSbSDYk0k2">Alice (여성 - 에너지 있고 활기찬)</option>
+                <option value="EXAVITQu4vr4xnSDxMaL">Sarah (여성 - 부드러운)</option>
               </select>
             </div>
 
