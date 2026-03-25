@@ -17,6 +17,9 @@
 
 ## 📌 서비스 소개
 
+https://github.com/user-attachments/assets/e77a38d9-8ecb-4010-aff0-bfc8d9d80cf3
+
+
 이 서비스는 **코딩 에이전트(Claude Code, Google Gemini)를 적극 활용**하여 구축한 AI 더빙 웹 서비스입니다.
 
 사용자가 오디오 또는 비디오 파일을 업로드하면 다음 흐름으로 자동 처리됩니다:
