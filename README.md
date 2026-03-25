@@ -10,8 +10,8 @@
 ---
 
 ## 🌐 배포된 서비스 URL
-* [cite_start]**배포 URL**: [여기에 Vercel 배포 URL을 입력하세요] [cite: 4, 44]
-* [cite_start]**GitHub Repository**: [여기에 레포지터리 주소 입력] [cite: 4]
+* **배포 URL**: https://ai-dubbing-web-app-assignment.vercel.app
+* **GitHub Repository**: https://github.com/edwardyun12/ai-dubbing-web-app
 
 ---
 
