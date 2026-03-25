@@ -1,0 +1,131 @@
+# 🎙️ AI Video Dubbing Web Service
+
+> A web service that automatically dubs uploaded audio or video files into your selected language.
+
+[![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat&logo=vercel&logoColor=white)](https://vercel.com/)
+[![Turso](https://img.shields.io/badge/Turso-4FF8D2?style=flat&logo=turso&logoColor=black)](https://turso.tech/)
+[![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?style=flat)](https://elevenlabs.io/)
+
+---
+
+## 🌐 Deployed Service URL
+* **Deployed URL**: https://ai-dubbing-web-app-assignment.vercel.app
+* **GitHub Repository**: https://github.com/edwardyun12/ai-dubbing-web-app
+
+---
+
+## 📌 Introduction
+
+This service is an AI dubbing web application built by actively utilizing **coding agents (Claude Code, Google Gemini, AntiGravity)**.
+
+When a user uploads an audio or video file, it is automatically processed through the following workflow:
+
+1. Extract and transcribe audio from the uploaded file — **ElevenLabs API**
+2. Translate the transcribed text into the target language — **Google Translate API**
+3. Select an appropriate AI voice & configure settings for the target language — **ElevenLabs Voice Library**
+4. Synthesize the translated text into voice — **ElevenLabs API**
+5. Preview and download the dubbed result
+
+---
+
+## ✨ Features
+
+### 🔊 Voice Dubbing
+- Upload audio or video files
+- Select target language and voice type (supports various AI voices such as male/female, calm/energetic, etc.)
+- Output the dubbed audio/video file
+- Play and download the result
+
+### 🔐 User Management (Whitelist-based Access Control)
+- Google OAuth login
+- Service access restricted to allowed email addresses
+- Block unauthorized user access (displays an alert message)
+- Allowed user data is stored securely in **Turso DB**
+
+### 🚀 Deployment Automation
+- Automatic **Vercel Deployment** triggered by GitHub commit & push
+
+---
+
+## 🛠️ Tech Stack
+
+| Category | Technology |
+|------|------|
+| Framework | Next.js |
+| Deployment | Vercel |
+| Database | Turso |
+| Voice API | ElevenLabs |
+| Translation | Google Translate API |
+| Authentication | Google OAuth |
+| Version Control | GitHub |
+
+---
+
+## ⚙️ How to Run Locally
+
+### 1. Prerequisites
+
+Please sign up for the following services and issue an API key.
+
+| Service | Purpose | Link |
+|--------|------|------|
+| GitHub | Code repository & Deployment trigger | https://github.com |
+| Vercel | Web service deployment (Free Plan) | https://vercel.com |
+| Turso | Database (Free Plan) | https://turso.tech |
+| ElevenLabs | Speech-to-text and Text-to-speech API (Free Plan) | https://elevenlabs.io |
+
+### 2. Clone Repository
+
+```bash
+git clone https://github.com/edwardyun12/ai-dubbing-web-app.git
+cd ai-dubbing-web-app
+```
+
+### 3. Environment Variables
+
+Create a `\.env.local` file and provide the following entries:
+
+```env
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+TURSO_DATABASE_URL=your_turso_database_url
+TURSO_AUTH_TOKEN=your_turso_auth_token
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+NEXTAUTH_SECRET=your_nextauth_secret
+NEXTAUTH_URL=http://localhost:3000
+```
+
+### 4. Install & Run
+
+```bash
+npm install
+npm run dev
+```
+
+Connect to [http://localhost:3000](http://localhost:3000) in your browser.
+
+
+## 🤖 Guide to Utilizing Coding Agents
+
+This project actively utilized coding agents to practice the core DevRel competency of **"building and sharing experiences directly."**  
+Development proceeded through Q&A with agents, from initial architecture design to implementing complex authentication logic integrating NextAuth and Turso DB. We effectively resolved issues such as environment variable security settings and Next.js Client Component limitations (like Suspense wrap issues) via real-time guidance.
+
+Furthermore, moving beyond simple code generation, we requested detailed explanations and comments for each line of code, and repeatedly refactored the codebase to build a highly readable and maintainable structure.
+
+### Agents Used
+- **Claude Code** — Responsible for writing the overall codebase and implementing features of the project. Specifically performed complex business logic design and drafting the initial `README.md`.
+- **Google Gemini, AntiGravity** — Conducted detailed debugging, supplemented documentation, and performed comprehensive optimization work on the implemented code. Improved code stability through cross-validation between agents.
+
+### Know-how
+ 
+- **Clear Requirement Submission**: Specifying I/O specs concretely leads to more accurate code generation.
+- **Step-by-step Requests**: Requesting functionality in smaller units rather than all at once produces better results.
+- **Commit After Review**: Maintain a habit of personally reviewing the code generated by the agent before committing it to Git.
+- **Paste Error Messages Exactly**: When an error occurs, pasting the error log directly to the agent leads to rapid resolution.
+
+> 💡 The **process of solving problems collaboratively with an agent** is more important than the absolute perfection of the generated code.
+
+## 📝 License
+
+This project was created as an assignment for the ESTsoft AI Translation Team DevRel Intern recruitment.
