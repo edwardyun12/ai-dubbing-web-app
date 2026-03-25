@@ -7,6 +7,8 @@
 [![Turso](https://img.shields.io/badge/Turso-4FF8D2?style=flat&logo=turso&logoColor=black)](https://turso.tech/)
 [![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?style=flat)](https://elevenlabs.io/)
 
+---
+
 ## 🌐 배포된 서비스 URL
 * [cite_start]**배포 URL**: [여기에 Vercel 배포 URL을 입력하세요] [cite: 4, 44]
 * [cite_start]**GitHub Repository**: [여기에 레포지터리 주소 입력] [cite: 4]
@@ -101,7 +103,6 @@ npm run dev
 
 브라우저에서 [http://localhost:3000](http://localhost:3000)으로 접속하세요.
 
----
 
 
 > **https://your-service-name.vercel.app**
