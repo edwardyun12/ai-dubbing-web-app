@@ -3,13 +3,6 @@ import translate from 'google-translate-api-next';
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '4.5mb',
-    },
-  },
-};
 
 export async function POST(req: NextRequest) {
   try {
