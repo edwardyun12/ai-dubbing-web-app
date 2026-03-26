@@ -58,25 +58,21 @@ export default function DubbingPage() {
     ffmpegLoadedRef.current = true;
   };
 
-  // 60초 크롭 + 비트레이트 제한으로 반드시 4.5MB(Vercel 한도) 이하로 만들기
+  // 60초 크롭 및 고압축 처리 (SharedArrayBuffer 타입 에러 수정 완료)
   const compressAndCrop = async (
     ffmpeg: FFmpeg,
-    inputName: string,
-    originalFile: File | Blob
+    inputName: string
   ): Promise<Blob> => {
     const outputName = `optimized.mp4`;
     setProgress("60초 크롭 및 고압축 중...");
 
-    // -t 60: 60초까지만 자름
-    // -vf scale=480:-2: 해상도 축소
-    // -b:v 500k: 비디오 비트레이트 강제 제한 (용량 확보 핵심)
     const result = await ffmpeg.exec([
       '-i', inputName,
-      '-t', '60',
-      '-vf', 'scale=480:-2',
+      '-t', '60',              // 최대 60초
+      '-vf', 'scale=480:-2',   // 해상도 축소
       '-c:v', 'libx264',
-      '-crf', '30',
-      '-b:v', '500k',
+      '-crf', '30',            // 압축률
+      '-b:v', '500k',          // 비트레이트 제한
       '-c:a', 'aac',
       '-b:a', '64k',
       '-preset', 'ultrafast',
@@ -86,24 +82,11 @@ export default function DubbingPage() {
     if (result === 0) {
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
       await ffmpeg.deleteFile(outputName);
-      return new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' });
+      // [중요] data.buffer 대신 data(Uint8Array)를 직접 전달하여 타입 에러 해결
+      return new Blob([data], { type: 'video/mp4' });
     }
 
-    throw new Error("전처리(압축/크롭) 실패");
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (!selected) return;
-    setFile(selected);
-  };
-
-  const handleDownload = () => {
-    if (!resultUrl) return;
-    const a = document.createElement('a');
-    a.href = resultUrl;
-    a.download = `dubbed_result.${saveMode}`;
-    a.click();
+    throw new Error("영상 전처리 실패");
   };
 
   const base64ToBlob = (b64: string, type = 'audio/mpeg') => {
@@ -134,7 +117,7 @@ export default function DubbingPage() {
 
       // 60초 초과이거나 4MB 초과면 압축/크롭 처리
       if (duration > 60 || file.size > 4 * 1024 * 1024) {
-        processedFile = await compressAndCrop(ffmpeg, inputName, file);
+        processedFile = await compressAndCrop(ffmpeg, inputName);
       }
 
       setProgress("AI 음성 생성 중...");
@@ -185,7 +168,12 @@ export default function DubbingPage() {
       }
 
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
-      setResultUrl(URL.createObjectURL(new Blob([data.buffer], { type: saveMode === 'mp4' ? 'video/mp4' : 'audio/mpeg' })));
+      
+      // [중요] 여기서도 data.buffer 대신 data를 사용하여 타입 에러 방지
+      const finalBlob = new Blob([data], { 
+        type: saveMode === 'mp4' ? 'video/mp4' : 'audio/mpeg' 
+      });
+      setResultUrl(URL.createObjectURL(finalBlob));
 
       // 파일 정리
       await ffmpeg.deleteFile('vid');
@@ -193,6 +181,7 @@ export default function DubbingPage() {
       for (let i = 0; i < chunks.length; i++) {
         await ffmpeg.deleteFile(`chunk_${i}.mp3`).catch(() => {});
       }
+      await ffmpeg.deleteFile(outputName).catch(() => {});
 
     } catch (error) {
       alert(error instanceof Error ? error.message : "알 수 없는 에러가 발생했습니다.");
@@ -200,6 +189,14 @@ export default function DubbingPage() {
       setLoading(false);
       setProgress("");
     }
+  };
+
+  const handleDownload = () => {
+    if (!resultUrl) return;
+    const a = document.createElement('a');
+    a.href = resultUrl;
+    a.download = `dubbed_result.${saveMode}`;
+    a.click();
   };
 
   return (
@@ -217,7 +214,7 @@ export default function DubbingPage() {
       <div className="w-full max-w-lg space-y-12">
         <header className="space-y-4">
           <h1 className="text-4xl font-black leading-tight tracking-tighter uppercase">AI Video <br /> Dubbing Service</h1>
-          <p className="text-sm font-medium text-gray-600">파일 크기 무관 · 1분 초과 시 자동 크롭 · 4MB 내외 자동 압축</p>
+          <p className="text-sm font-medium text-gray-600">60초 자동 크롭 및 Vercel 4.5MB 제한 최적화 버전</p>
         </header>
 
         {!session ? (
@@ -226,11 +223,12 @@ export default function DubbingPage() {
             GOOGLE LOGIN
           </button>
         ) : (
-          <div className="space-y-10">
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">01. File Upload</label>
               <div className="border-2 border-black p-6 rounded-2xl">
-                <input type="file" accept="video/*,audio/*" onChange={handleFileChange} className="w-full text-sm font-bold cursor-pointer" />
+                <input type="file" accept="video/*,audio/*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-sm font-bold cursor-pointer" />
+                <p className="mt-3 text-[10px] text-gray-400 font-bold uppercase tracking-tighter">* 1분 초과 시 자동 크롭</p>
               </div>
             </div>
 
@@ -238,8 +236,8 @@ export default function DubbingPage() {
               <div className="space-y-3">
                 <label className="text-xs font-black uppercase tracking-widest">02. Format</label>
                 <div className="flex gap-2">
-                  {['mp4', 'mp3'].map((mode) => (
-                    <button key={mode} onClick={() => setSaveMode(mode as any)} className={`flex-1 py-3 rounded-xl border-2 font-black text-xs ${saveMode === mode ? 'bg-black text-white border-black' : 'bg-white'}`}>
+                  {(['mp4', 'mp3'] as const).map((mode) => (
+                    <button key={mode} onClick={() => setSaveMode(mode)} className={`flex-1 py-3 rounded-xl border-2 font-black text-xs transition-all ${saveMode === mode ? 'bg-black text-white border-black' : 'bg-white text-black border-gray-200'}`}>
                       {mode.toUpperCase()}
                     </button>
                   ))}
@@ -247,34 +245,38 @@ export default function DubbingPage() {
               </div>
               <div className="space-y-3">
                 <label className="text-xs font-black uppercase tracking-widest">03. Language</label>
-                <select value={targetLang} onChange={(e) => setTargetLang(e.target.value)} className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold">
+                <select value={targetLang} onChange={(e) => setTargetLang(e.target.value)} className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold outline-none bg-white appearance-none cursor-pointer">
                   <option value="ko">한국어 (Korean)</option>
                   <option value="en">영어 (English)</option>
                   <option value="ja">일본어 (Japanese)</option>
                   <option value="zh-CN">중국어 (Chinese)</option>
+                  <option value="es">스페인어 (Spanish)</option>
+                  <option value="fr">프랑스어 (French)</option>
                 </select>
               </div>
             </div>
 
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">04. Voice Type</label>
-              <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)} className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold">
+              <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)} className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold outline-none bg-white cursor-pointer">
                 <option value="CwhRBWXzGAHq8TQ4Fs17">Roger (남성 - 기본)</option>
                 <option value="Xb7hH8MSUJpSbSDYk0k2">Alice (여성 - 활기찬)</option>
                 <option value="IKne3meq5aSn9XLyUdCD">Charlie (남성 - 차분한)</option>
+                <option value="JBFqnCBsd6RMkjVDRZzb">George (남성 - 따뜻한)</option>
               </select>
             </div>
 
-            <button onClick={handleSubmit} disabled={loading} className={`w-full py-5 rounded-full font-black text-sm transition-all ${loading ? 'bg-gray-100 text-gray-400' : 'bg-black text-white shadow-xl'}`}>
+            <button onClick={handleSubmit} disabled={loading} className={`w-full py-5 rounded-full font-black text-sm tracking-widest transition-all shadow-xl ${loading ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-black text-white hover:scale-[1.02] active:scale-95'}`}>
               {loading ? progress.toUpperCase() : 'GENERATE DUBBING'}
             </button>
 
             {resultUrl && (
-              <div className="mt-16 pt-12 border-t-2 border-black text-center space-y-6 animate-in zoom-in">
+              <div className="mt-16 pt-12 border-t-2 border-black text-center space-y-6 animate-in zoom-in duration-500">
+                <span className="inline-block px-4 py-1 bg-black text-white text-[10px] font-black uppercase tracking-widest rounded-full">Success</span>
                 <div className="overflow-hidden rounded-2xl border-2 border-black bg-gray-50 shadow-2xl">
                   {saveMode === 'mp4' ? <video src={resultUrl} controls className="w-full" /> : <audio src={resultUrl} controls className="w-full p-8" />}
                 </div>
-                <button onClick={handleDownload} className="text-xs font-black border-b-2 border-black pb-1 uppercase">Download {saveMode} File</button>
+                <button onClick={handleDownload} className="text-xs font-black border-b-2 border-black pb-1 uppercase tracking-tighter">Download {saveMode} File</button>
               </div>
             )}
           </div>
