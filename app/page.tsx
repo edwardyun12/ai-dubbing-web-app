@@ -83,7 +83,7 @@ export default function DubbingPage() {
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
       await ffmpeg.deleteFile(outputName);
       // [중요] data.buffer 대신 data(Uint8Array)를 직접 전달하여 타입 에러 해결
-      return new Blob([data], { type: 'video/mp4' });
+      return new Blob([data as any], { type: 'video/mp4' });
     }
 
     throw new Error("영상 전처리 실패");
@@ -170,7 +170,7 @@ export default function DubbingPage() {
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
       
       // [중요] 여기서도 data.buffer 대신 data를 사용하여 타입 에러 방지
-      const finalBlob = new Blob([data], { 
+      const finalBlob = new Blob([data as any], { 
         type: saveMode === 'mp4' ? 'video/mp4' : 'audio/mpeg' 
       });
       setResultUrl(URL.createObjectURL(finalBlob));
