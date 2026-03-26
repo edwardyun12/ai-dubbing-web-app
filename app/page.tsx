@@ -16,7 +16,7 @@ const getMediaDuration = (file: File): Promise<number> => {
     };
     media.onerror = () => {
       URL.revokeObjectURL(media.src);
-      resolve(Infinity); // 에러 시 무조건 크롭 시도
+      resolve(Infinity);
     };
     media.src = URL.createObjectURL(file);
   });
@@ -42,14 +42,10 @@ export default function DubbingPage() {
   }, [resultUrl]);
 
   const loadFFmpeg = async () => {
-    // 이미 로드 완료된 경우 재사용
     if (ffmpegLoadedRef.current && ffmpegRef.current) return;
-
-    // FFmpeg 인스턴스가 없으면 새로 생성
     if (!ffmpegRef.current) {
       ffmpegRef.current = new FFmpeg();
     }
-
     const ffmpeg = ffmpegRef.current;
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
     setProgress("엔진 로드 중...");
@@ -60,12 +56,6 @@ export default function DubbingPage() {
     ffmpegLoadedRef.current = true;
   };
 
-  /**
-   * 클라이언트(브라우저)에서 FFmpeg WebAssembly로 영상/음성을 최대 60초로 크롭합니다.
-   * 1차 시도: -c copy (빠름, 재인코딩 없음)
-   * 2차 시도: 재인코딩 (모바일 촬영 영상 등 keyframe 문제 대응)
-   * 두 방법 모두 실패 시: 원본 파일 반환 (서버단에서 거절될 수 있음을 경고)
-   */
   const cropTo60Seconds = async (
     ffmpeg: FFmpeg,
     inputName: string,
@@ -73,9 +63,6 @@ export default function DubbingPage() {
     originalFile: File | Blob
   ): Promise<{ blob: Blob; warned: boolean }> => {
     const outputName = `cropped.${ext}`;
-
-    // 재인코딩으로 정확히 60초 크롭
-    // -c copy는 keyframe 단위로만 잘려서 30초 등 엉뚱한 길이로 나오는 문제 있음
     setProgress("1분 크롭 중...");
     const result = await ffmpeg.exec([
       '-i', inputName,
@@ -95,14 +82,24 @@ export default function DubbingPage() {
       };
     }
 
-    console.warn("크롭 실패 → 원본 파일로 진행 (서버 제한 가능성 있음)");
-
+    console.warn("크롭 실패 → 원본 파일로 진행");
     return {
       blob: originalFile instanceof File
         ? new Blob([await originalFile.arrayBuffer()], { type: originalFile.type })
         : originalFile as Blob,
       warned: true,
     };
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+    if (selected.size > 4 * 1024 * 1024) {
+      alert('파일이 4MB를 초과합니다.\n30초~1분 이하의 짧은 영상을 사용해주세요.');
+      e.target.value = '';
+      return;
+    }
+    setFile(selected);
   };
 
   const handleSubmit = async () => {
@@ -121,7 +118,6 @@ export default function DubbingPage() {
 
       let processedFile: File | Blob = file;
 
-      // 1분(60초) 이상인 경우에만 크롭 수행
       if (duration > 60) {
         setProgress("파일 준비 중...");
         await loadFFmpeg();
@@ -131,7 +127,6 @@ export default function DubbingPage() {
         const inputName = `input_${file.name.replace(/[^a-zA-Z0-9.]/g, '') || 'media'}`;
         await ffmpeg.writeFile(inputName, await fetchFile(file));
 
-        // 클라이언트 측 1분 크롭 (서버 아님)
         const { blob: croppedBlob, warned } = await cropTo60Seconds(ffmpeg, inputName, ext, file);
         processedFile = croppedBlob;
 
@@ -152,15 +147,18 @@ export default function DubbingPage() {
       formData.append('voiceId', voiceId);
 
       const res = await fetch('/api/dub', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error("더빙 생성 실패");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "더빙 생성 실패");
+      }
 
       const resData = await res.json();
       if (!resData.chunks || resData.chunks.length === 0) {
         throw new Error("처리된 음성 데이터가 없습니다.");
       }
-      
+
       const chunks = resData.chunks as { audioBase64: string, start: number }[];
-      
+
       const base64ToBlob = (b64: string, type = 'audio/mpeg') => {
         const binStr = atob(b64);
         const len = binStr.length;
@@ -179,7 +177,7 @@ export default function DubbingPage() {
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
 
         await ffmpeg.writeFile('vid', await fetchFile(processedFile));
-        
+
         const inputs = ['-i', 'vid'];
         let filterComplex = '';
         const aOuts: string[] = [];
@@ -188,7 +186,6 @@ export default function DubbingPage() {
           const chunkBlob = base64ToBlob(chunks[i].audioBase64);
           const chunkName = `chunk_${i}.mp3`;
           await ffmpeg.writeFile(chunkName, await fetchFile(chunkBlob));
-          
           inputs.push('-i', chunkName);
           const delayMs = Math.round(chunks[i].start * 1000);
           filterComplex += `[${i+1}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
@@ -205,7 +202,7 @@ export default function DubbingPage() {
             'out.mp4'
           ]);
         } else {
-          filterComplex = filterComplex.slice(0, -1); // trailing semicolon 제거
+          filterComplex = filterComplex.slice(0, -1);
           await ffmpeg.exec([
             ...inputs,
             '-filter_complex', filterComplex,
@@ -219,13 +216,11 @@ export default function DubbingPage() {
         const finalBlob = new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' });
         setResultUrl(URL.createObjectURL(finalBlob));
 
-        // VFS 정리
         const cleanupFiles = ['vid', ...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp4'];
         for (const fname of cleanupFiles) {
           await ffmpeg.deleteFile(fname).catch(() => {});
         }
       } else {
-        // audio only export
         setProgress("오디오 타임라인 합성 중...");
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
@@ -239,7 +234,6 @@ export default function DubbingPage() {
           const chunkBlob = base64ToBlob(chunks[i].audioBase64);
           const chunkName = `chunk_${i}.mp3`;
           await ffmpeg.writeFile(chunkName, await fetchFile(chunkBlob));
-          
           inputs.push('-i', chunkName);
           const delayMs = Math.round(chunks[i].start * 1000);
           filterComplex += `[${i}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
@@ -283,7 +277,6 @@ export default function DubbingPage() {
 
   return (
     <main className="min-h-screen bg-white p-6 md:p-12 flex flex-col items-center text-black">
-      {/* 상단 네비게이션 */}
       <div className="w-full max-w-lg mb-12 flex justify-between items-center">
         <h2 className="text-xl font-black tracking-tighter">VOICE DUB</h2>
         {session && (
@@ -322,14 +315,13 @@ export default function DubbingPage() {
           </div>
         ) : (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* 1. 파일 섹션 */}
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">01. File Upload</label>
               <div className="border-2 border-black p-6 rounded-2xl">
                 <input
                   type="file"
                   accept="video/*,audio/*"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  onChange={handleFileChange}
                   className="w-full text-sm font-medium file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-black file:text-white file:text-xs file:font-bold hover:file:bg-gray-800 cursor-pointer"
                 />
                 <p className="mt-3 text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
@@ -338,7 +330,6 @@ export default function DubbingPage() {
               </div>
             </div>
 
-            {/* 2. 저장 형식 섹션 */}
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">02. Save Format</label>
               <div className="flex gap-2">
@@ -356,7 +347,6 @@ export default function DubbingPage() {
               </div>
             </div>
 
-            {/* 3. 언어 선택 섹션 */}
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">03. Target Language</label>
               <select
@@ -381,7 +371,6 @@ export default function DubbingPage() {
               </select>
             </div>
 
-            {/* 4. 목소리 선택 섹션 */}
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">04. Voice Type</label>
               <select
@@ -398,7 +387,6 @@ export default function DubbingPage() {
               </select>
             </div>
 
-            {/* 실행 버튼 */}
             <button
               onClick={handleSubmit}
               disabled={loading}
@@ -409,7 +397,6 @@ export default function DubbingPage() {
               {loading ? progress.toUpperCase() : 'GENERATE DUBBING'}
             </button>
 
-            {/* 결과 표시 섹션 */}
             {resultUrl && (
               <div className="mt-16 pt-12 border-t-2 border-black text-center space-y-6 animate-in zoom-in duration-500">
                 <span className="inline-block px-4 py-1 bg-black text-white text-[10px] font-black uppercase tracking-widest rounded-full">
@@ -424,7 +411,7 @@ export default function DubbingPage() {
                     </div>
                   )}
                 </div>
-                <a
+                
                   href={resultUrl}
                   download={`dubbed_result.${saveMode}`}
                   className="inline-flex items-center gap-2 text-xs font-black border-b-2 border-black pb-1 hover:text-gray-500 hover:border-gray-500 transition-all uppercase tracking-tighter"
