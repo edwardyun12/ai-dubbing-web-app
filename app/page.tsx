@@ -188,7 +188,7 @@ export default function DubbingPage() {
           await ffmpeg.writeFile(chunkName, await fetchFile(chunkBlob));
           inputs.push('-i', chunkName);
           const delayMs = Math.round(chunks[i].start * 1000);
-          filterComplex += `[${i+1}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
+          filterComplex += `[${i + 1}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
           aOuts.push(`[a${i}]`);
         }
 
@@ -220,6 +220,7 @@ export default function DubbingPage() {
         for (const fname of cleanupFiles) {
           await ffmpeg.deleteFile(fname).catch(() => {});
         }
+
       } else {
         setProgress("오디오 타임라인 합성 중...");
         await loadFFmpeg();
@@ -267,6 +268,7 @@ export default function DubbingPage() {
           await ffmpeg.deleteFile(fname).catch(() => {});
         }
       }
+
     } catch (error) {
       alert(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.");
     } finally {
