@@ -72,7 +72,6 @@ export default function DubbingPage() {
       '-preset', 'ultrafast',
       outputName,
     ]);
-
     if (result === 0) {
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
       await ffmpeg.deleteFile(outputName);
@@ -81,7 +80,6 @@ export default function DubbingPage() {
         warned: false,
       };
     }
-
     console.warn("크롭 실패 → 원본 파일로 진행");
     return {
       blob: originalFile instanceof File
@@ -102,13 +100,19 @@ export default function DubbingPage() {
     setFile(selected);
   };
 
+  const handleDownload = () => {
+    if (!resultUrl) return;
+    const a = document.createElement('a');
+    a.href = resultUrl;
+    a.download = `dubbed_result.${saveMode}`;
+    a.click();
+  };
+
   const handleSubmit = async () => {
     if (!file) return alert("파일을 선택해주세요!");
-
     setLoading(true);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
-
     try {
       setProgress("미디어 길이 확인 중...");
       const duration = await getMediaDuration(file);
@@ -123,20 +127,13 @@ export default function DubbingPage() {
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
-
         const inputName = `input_${file.name.replace(/[^a-zA-Z0-9.]/g, '') || 'media'}`;
         await ffmpeg.writeFile(inputName, await fetchFile(file));
-
         const { blob: croppedBlob, warned } = await cropTo60Seconds(ffmpeg, inputName, ext, file);
         processedFile = croppedBlob;
-
         await ffmpeg.deleteFile(inputName);
-
         if (warned) {
-          alert(
-            "⚠️ 1분 크롭에 실패하여 원본 파일을 사용합니다.\n" +
-            "파일이 4MB를 초과하면 서버에서 거절될 수 있습니다."
-          );
+          alert("⚠️ 1분 크롭에 실패하여 원본 파일을 사용합니다.\n파일이 4MB를 초과하면 서버에서 거절될 수 있습니다.");
         }
       }
 
@@ -161,9 +158,8 @@ export default function DubbingPage() {
 
       const base64ToBlob = (b64: string, type = 'audio/mpeg') => {
         const binStr = atob(b64);
-        const len = binStr.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
+        const bytes = new Uint8Array(binStr.length);
+        for (let i = 0; i < binStr.length; i++) {
           bytes[i] = binStr.charCodeAt(i);
         }
         return new Blob([bytes], { type });
@@ -171,17 +167,13 @@ export default function DubbingPage() {
 
       if (saveMode === 'mp4' && file.type.startsWith('video/')) {
         setProgress("비디오 타임라인 동기화 및 합성 중...");
-
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
-
         await ffmpeg.writeFile('vid', await fetchFile(processedFile));
-
         const inputs = ['-i', 'vid'];
         let filterComplex = '';
         const aOuts: string[] = [];
-
         for (let i = 0; i < chunks.length; i++) {
           const chunkBlob = base64ToBlob(chunks[i].audioBase64);
           const chunkName = `chunk_${i}.mp3`;
@@ -191,46 +183,26 @@ export default function DubbingPage() {
           filterComplex += `[${i + 1}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
           aOuts.push(`[a${i}]`);
         }
-
         if (chunks.length > 1) {
           filterComplex += `${aOuts.join('')}amix=inputs=${chunks.length}:normalize=0[aout]`;
-          await ffmpeg.exec([
-            ...inputs,
-            '-filter_complex', filterComplex,
-            '-c:v', 'copy',
-            '-map', '0:v:0', '-map', '[aout]',
-            'out.mp4'
-          ]);
+          await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-c:v', 'copy', '-map', '0:v:0', '-map', '[aout]', 'out.mp4']);
         } else {
           filterComplex = filterComplex.slice(0, -1);
-          await ffmpeg.exec([
-            ...inputs,
-            '-filter_complex', filterComplex,
-            '-c:v', 'copy',
-            '-map', '0:v:0', '-map', '[a0]',
-            'out.mp4'
-          ]);
+          await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-c:v', 'copy', '-map', '0:v:0', '-map', '[a0]', 'out.mp4']);
         }
-
         const data = await ffmpeg.readFile('out.mp4') as Uint8Array;
-        const finalBlob = new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' });
-        setResultUrl(URL.createObjectURL(finalBlob));
-
+        setResultUrl(URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' })));
         const cleanupFiles = ['vid', ...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp4'];
-        for (const fname of cleanupFiles) {
-          await ffmpeg.deleteFile(fname).catch(() => {});
-        }
+        for (const fname of cleanupFiles) { await ffmpeg.deleteFile(fname).catch(() => {}); }
 
       } else {
         setProgress("오디오 타임라인 합성 중...");
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
-
         const inputs: string[] = [];
         let filterComplex = '';
         const aOuts: string[] = [];
-
         for (let i = 0; i < chunks.length; i++) {
           const chunkBlob = base64ToBlob(chunks[i].audioBase64);
           const chunkName = `chunk_${i}.mp3`;
@@ -240,33 +212,17 @@ export default function DubbingPage() {
           filterComplex += `[${i}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
           aOuts.push(`[a${i}]`);
         }
-
         if (chunks.length > 1) {
           filterComplex += `${aOuts.join('')}amix=inputs=${chunks.length}:normalize=0[aout]`;
-          await ffmpeg.exec([
-            ...inputs,
-            '-filter_complex', filterComplex,
-            '-map', '[aout]',
-            'out.mp3'
-          ]);
+          await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-map', '[aout]', 'out.mp3']);
         } else {
           filterComplex = filterComplex.slice(0, -1);
-          await ffmpeg.exec([
-            ...inputs,
-            '-filter_complex', filterComplex,
-            '-map', '[a0]',
-            'out.mp3'
-          ]);
+          await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-map', '[a0]', 'out.mp3']);
         }
-
         const data = await ffmpeg.readFile('out.mp3') as Uint8Array;
-        const finalAudioBlob = new Blob([data.buffer as ArrayBuffer], { type: 'audio/mpeg' });
-        setResultUrl(URL.createObjectURL(finalAudioBlob));
-
+        setResultUrl(URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: 'audio/mpeg' })));
         const cleanupFiles = [...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp3'];
-        for (const fname of cleanupFiles) {
-          await ffmpeg.deleteFile(fname).catch(() => {});
-        }
+        for (const fname of cleanupFiles) { await ffmpeg.deleteFile(fname).catch(() => {}); }
       }
 
     } catch (error) {
@@ -413,13 +369,12 @@ export default function DubbingPage() {
                     </div>
                   )}
                 </div>
-                
-                  href={resultUrl}
-                  download={`dubbed_result.${saveMode}`}
+                <button
+                  onClick={handleDownload}
                   className="inline-flex items-center gap-2 text-xs font-black border-b-2 border-black pb-1 hover:text-gray-500 hover:border-gray-500 transition-all uppercase tracking-tighter"
                 >
                   Download {saveMode} File
-                </a>
+                </button>
               </div>
             )}
           </div>
