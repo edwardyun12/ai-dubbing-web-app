@@ -16,7 +16,7 @@ const getMediaDuration = (file: File): Promise<number> => {
     };
     media.onerror = () => {
       URL.revokeObjectURL(media.src);
-      resolve(Infinity);
+      resolve(Infinity); // 에러 시 무조건 크롭 시도
     };
     media.src = URL.createObjectURL(file);
   });
@@ -36,12 +36,20 @@ export default function DubbingPage() {
   const ffmpegLoadedRef = useRef<boolean>(false);
 
   useEffect(() => {
-    return () => { if (resultUrl) URL.revokeObjectURL(resultUrl); };
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
   }, [resultUrl]);
 
   const loadFFmpeg = async () => {
+    // 이미 로드 완료된 경우 재사용
     if (ffmpegLoadedRef.current && ffmpegRef.current) return;
-    if (!ffmpegRef.current) ffmpegRef.current = new FFmpeg();
+
+    // FFmpeg 인스턴스가 없으면 새로 생성
+    if (!ffmpegRef.current) {
+      ffmpegRef.current = new FFmpeg();
+    }
+
     const ffmpeg = ffmpegRef.current;
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
     setProgress("엔진 로드 중...");
@@ -52,89 +60,221 @@ export default function DubbingPage() {
     ffmpegLoadedRef.current = true;
   };
 
-  const compressAndCrop = async (ffmpeg: FFmpeg, inputName: string): Promise<Blob> => {
-    const outputName = `optimized.mp4`;
-    setProgress("압축 및 60초 크롭 중...");
+  /**
+   * 클라이언트(브라우저)에서 FFmpeg WebAssembly로 영상/음성을 최대 60초로 크롭합니다.
+   * 1차 시도: -c copy (빠름, 재인코딩 없음)
+   * 2차 시도: 재인코딩 (모바일 촬영 영상 등 keyframe 문제 대응)
+   * 두 방법 모두 실패 시: 원본 파일 반환 (서버단에서 거절될 수 있음을 경고)
+   */
+  const cropTo60Seconds = async (
+    ffmpeg: FFmpeg,
+    inputName: string,
+    ext: string,
+    originalFile: File | Blob
+  ): Promise<{ blob: Blob; warned: boolean }> => {
+    const outputName = `cropped.${ext}`;
+
+    // 재인코딩으로 정확히 60초 크롭
+    // -c copy는 keyframe 단위로만 잘려서 30초 등 엉뚱한 길이로 나오는 문제 있음
+    setProgress("1분 크롭 중...");
     const result = await ffmpeg.exec([
-      '-i', inputName, '-t', '60', '-vf', 'scale=480:-2',
-      '-c:v', 'libx264', '-crf', '32', '-b:v', '400k',
-      '-c:a', 'aac', '-b:a', '64k', '-preset', 'ultrafast', outputName,
+      '-i', inputName,
+      '-t', '60',
+      '-c:v', 'libx264',
+      '-c:a', 'aac',
+      '-preset', 'ultrafast',
+      outputName,
     ]);
+
     if (result === 0) {
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
       await ffmpeg.deleteFile(outputName);
-      return new Blob([data as any], { type: 'video/mp4' }); // as any로 빌드 에러 방지
+      return {
+        blob: new Blob([data.buffer as ArrayBuffer], { type: `video/${ext}` }),
+        warned: false,
+      };
     }
-    throw new Error("전처리 실패");
-  };
 
-  const base64ToBlob = (b64: string) => {
-    const binStr = atob(b64);
-    const bytes = new Uint8Array(binStr.length);
-    for (let i = 0; i < binStr.length; i++) { bytes[i] = binStr.charCodeAt(i); }
-    return new Blob([bytes], { type: 'audio/mpeg' });
+    console.warn("크롭 실패 → 원본 파일로 진행 (서버 제한 가능성 있음)");
+
+    return {
+      blob: originalFile instanceof File
+        ? new Blob([await originalFile.arrayBuffer()], { type: originalFile.type })
+        : originalFile as Blob,
+      warned: true,
+    };
   };
 
   const handleSubmit = async () => {
     if (!file) return alert("파일을 선택해주세요!");
+
     setLoading(true);
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
 
     try {
+      setProgress("미디어 길이 확인 중...");
       const duration = await getMediaDuration(file);
-      await loadFFmpeg();
-      const ffmpeg = ffmpegRef.current!;
-      
-      let processedFile: File | Blob = file;
-      await ffmpeg.writeFile('raw_input', await fetchFile(file));
+      const ext = (file.name.includes('.')
+        ? file.name.split('.').pop()?.toLowerCase()
+        : undefined) ?? 'mp4';
 
-      if (duration > 60 || file.size > 4 * 1024 * 1024) {
-        processedFile = await compressAndCrop(ffmpeg, 'raw_input');
+      let processedFile: File | Blob = file;
+
+      // 1분(60초) 이상인 경우에만 크롭 수행
+      if (duration > 60) {
+        setProgress("파일 준비 중...");
+        await loadFFmpeg();
+        const ffmpeg = ffmpegRef.current;
+        if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
+
+        const inputName = `input_${file.name.replace(/[^a-zA-Z0-9.]/g, '') || 'media'}`;
+        await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+        // 클라이언트 측 1분 크롭 (서버 아님)
+        const { blob: croppedBlob, warned } = await cropTo60Seconds(ffmpeg, inputName, ext, file);
+        processedFile = croppedBlob;
+
+        await ffmpeg.deleteFile(inputName);
+
+        if (warned) {
+          alert(
+            "⚠️ 1분 크롭에 실패하여 원본 파일을 사용합니다.\n" +
+            "파일이 4MB를 초과하면 서버에서 거절될 수 있습니다."
+          );
+        }
       }
 
       setProgress("AI 음성 생성 중...");
       const formData = new FormData();
-      formData.append('file', processedFile, `media.mp4`);
+      formData.append('file', processedFile, `media.${ext}`);
       formData.append('targetLang', targetLang);
       formData.append('voiceId', voiceId);
 
       const res = await fetch('/api/dub', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error("API 요청 실패 (용량 초과 가능성)");
+      if (!res.ok) throw new Error("더빙 생성 실패");
 
-      const { chunks } = await res.json();
-      setProgress("묵음 제거 및 순차 합성 중...");
-
-      // 묵음 제거의 핵심: adelay를 빼고 concat으로 음성을 이어 붙임
-      const filterInputs: string[] = [];
-      for (let i = 0; i < chunks.length; i++) {
-        const name = `c${i}.mp3`;
-        await ffmpeg.writeFile(name, await fetchFile(base64ToBlob(chunks[i].audioBase64)));
-        filterInputs.push(`-i`, name);
+      const resData = await res.json();
+      if (!resData.chunks || resData.chunks.length === 0) {
+        throw new Error("처리된 음성 데이터가 없습니다.");
       }
-
-      const outputName = saveMode === 'mp4' ? 'out.mp4' : 'out.mp3';
       
-      // 모든 음성 청크를 하나로 합치는 필터 (concat)
-      const concatFilter = chunks.map((_, i) => `[${saveMode === 'mp4' ? i + 1 : i}:a]`).join('') + `concat=n=${chunks.length}:v=0:a=1[aout]`;
+      const chunks = resData.chunks as { audioBase64: string, start: number }[];
+      
+      const base64ToBlob = (b64: string, type = 'audio/mpeg') => {
+        const binStr = atob(b64);
+        const len = binStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binStr.charCodeAt(i);
+        }
+        return new Blob([bytes], { type });
+      };
 
-      if (saveMode === 'mp4') {
+      if (saveMode === 'mp4' && file.type.startsWith('video/')) {
+        setProgress("비디오 타임라인 동기화 및 합성 중...");
+
+        await loadFFmpeg();
+        const ffmpeg = ffmpegRef.current;
+        if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
+
         await ffmpeg.writeFile('vid', await fetchFile(processedFile));
-        await ffmpeg.exec(['-i', 'vid', ...filterInputs, '-filter_complex', concatFilter, '-map', '0:v:0', '-map', '[aout]', '-c:v', 'copy', '-shortest', outputName]);
+        
+        const inputs = ['-i', 'vid'];
+        let filterComplex = '';
+        const aOuts: string[] = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+          const chunkBlob = base64ToBlob(chunks[i].audioBase64);
+          const chunkName = `chunk_${i}.mp3`;
+          await ffmpeg.writeFile(chunkName, await fetchFile(chunkBlob));
+          
+          inputs.push('-i', chunkName);
+          const delayMs = Math.round(chunks[i].start * 1000);
+          filterComplex += `[${i+1}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
+          aOuts.push(`[a${i}]`);
+        }
+
+        if (chunks.length > 1) {
+          filterComplex += `${aOuts.join('')}amix=inputs=${chunks.length}:normalize=0[aout]`;
+          await ffmpeg.exec([
+            ...inputs,
+            '-filter_complex', filterComplex,
+            '-c:v', 'copy',
+            '-map', '0:v:0', '-map', '[aout]',
+            'out.mp4'
+          ]);
+        } else {
+          filterComplex = filterComplex.slice(0, -1); // trailing semicolon 제거
+          await ffmpeg.exec([
+            ...inputs,
+            '-filter_complex', filterComplex,
+            '-c:v', 'copy',
+            '-map', '0:v:0', '-map', '[a0]',
+            'out.mp4'
+          ]);
+        }
+
+        const data = await ffmpeg.readFile('out.mp4') as Uint8Array;
+        const finalBlob = new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' });
+        setResultUrl(URL.createObjectURL(finalBlob));
+
+        // VFS 정리
+        const cleanupFiles = ['vid', ...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp4'];
+        for (const fname of cleanupFiles) {
+          await ffmpeg.deleteFile(fname).catch(() => {});
+        }
       } else {
-        await ffmpeg.exec([...filterInputs, '-filter_complex', concatFilter, '-map', '[aout]', outputName]);
+        // audio only export
+        setProgress("오디오 타임라인 합성 중...");
+        await loadFFmpeg();
+        const ffmpeg = ffmpegRef.current;
+        if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
+
+        const inputs: string[] = [];
+        let filterComplex = '';
+        const aOuts: string[] = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+          const chunkBlob = base64ToBlob(chunks[i].audioBase64);
+          const chunkName = `chunk_${i}.mp3`;
+          await ffmpeg.writeFile(chunkName, await fetchFile(chunkBlob));
+          
+          inputs.push('-i', chunkName);
+          const delayMs = Math.round(chunks[i].start * 1000);
+          filterComplex += `[${i}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
+          aOuts.push(`[a${i}]`);
+        }
+
+        if (chunks.length > 1) {
+          filterComplex += `${aOuts.join('')}amix=inputs=${chunks.length}:normalize=0[aout]`;
+          await ffmpeg.exec([
+            ...inputs,
+            '-filter_complex', filterComplex,
+            '-map', '[aout]',
+            'out.mp3'
+          ]);
+        } else {
+          filterComplex = filterComplex.slice(0, -1);
+          await ffmpeg.exec([
+            ...inputs,
+            '-filter_complex', filterComplex,
+            '-map', '[a0]',
+            'out.mp3'
+          ]);
+        }
+
+        const data = await ffmpeg.readFile('out.mp3') as Uint8Array;
+        const finalAudioBlob = new Blob([data.buffer as ArrayBuffer], { type: 'audio/mpeg' });
+        setResultUrl(URL.createObjectURL(finalAudioBlob));
+
+        const cleanupFiles = [...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp3'];
+        for (const fname of cleanupFiles) {
+          await ffmpeg.deleteFile(fname).catch(() => {});
+        }
       }
-
-      const data = await ffmpeg.readFile(outputName) as Uint8Array;
-      const finalBlob = new Blob([data as any], { type: saveMode === 'mp4' ? 'video/mp4' : 'audio/mpeg' });
-      setResultUrl(URL.createObjectURL(finalBlob));
-
-      // 정리
-      await ffmpeg.deleteFile('raw_input');
-      if (saveMode === 'mp4') await ffmpeg.deleteFile('vid');
-      for (let i = 0; i < chunks.length; i++) await ffmpeg.deleteFile(`c${i}.mp3`);
-
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.");
     } finally {
       setLoading(false);
       setProgress("");
@@ -143,62 +283,163 @@ export default function DubbingPage() {
 
   return (
     <main className="min-h-screen bg-white p-6 md:p-12 flex flex-col items-center text-black">
+      {/* 상단 네비게이션 */}
       <div className="w-full max-w-lg mb-12 flex justify-between items-center">
         <h2 className="text-xl font-black tracking-tighter">VOICE DUB</h2>
         {session && (
-          <button onClick={() => signOut()} className="text-xs font-bold border-b border-black">LOGOUT</button>
+          <div className="flex items-center gap-4">
+            <span className="text-xs font-medium text-gray-500">{session.user?.email}</span>
+            <button
+              onClick={() => signOut()}
+              className="text-xs font-bold border-b border-black pb-0.5 hover:text-gray-500 hover:border-gray-500 transition-all"
+            >
+              LOGOUT
+            </button>
+          </div>
         )}
       </div>
 
       <div className="w-full max-w-lg space-y-12">
         <header className="space-y-4">
-          <h1 className="text-4xl font-black leading-tight tracking-tighter uppercase">AI Video <br /> Dubbing</h1>
-          <p className="text-sm text-gray-600 font-bold">공백 없이 목소리만 이어 붙이는 모드 활성화</p>
+          <h1 className="text-4xl font-black leading-tight tracking-tighter uppercase">
+            AI Video <br /> Dubbing Service
+          </h1>
+          <p className="text-sm font-medium leading-relaxed text-gray-600 max-w-sm">
+            영상이나 음성 파일을 업로드하면 AI가 자연스러운 목소리로 더빙해 드립니다.
+            모든 합성은 브라우저에서 안전하게 처리됩니다.
+          </p>
         </header>
 
         {!session ? (
-          <button onClick={() => signIn('google')} className="w-full py-4 bg-black text-white font-bold rounded-full">GOOGLE LOGIN</button>
+          <div className="pt-8">
+            <button
+              onClick={() => signIn('google')}
+              className="w-full py-4 bg-black text-white font-bold rounded-full hover:bg-gray-800 transition-all flex items-center justify-center gap-3"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="google" className="w-5 h-5 invert" />
+              GOOGLE LOGIN
+            </button>
+          </div>
         ) : (
-          <div className="space-y-10">
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* 1. 파일 섹션 */}
             <div className="space-y-3">
               <label className="text-xs font-black uppercase tracking-widest">01. File Upload</label>
-              <input type="file" accept="video/*,audio/*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full border-2 border-black p-4 rounded-2xl text-xs font-bold" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <label className="text-xs font-black uppercase tracking-widest">02. Format</label>
-                <select value={saveMode} onChange={(e) => setSaveMode(e.target.value as any)} className="w-full border-2 border-black p-3 rounded-xl font-bold text-sm">
-                  <option value="mp4">MP4 Video</option>
-                  <option value="mp3">MP3 Audio</option>
-                </select>
-              </div>
-              <div className="space-y-3">
-                <label className="text-xs font-black uppercase tracking-widest">03. Language</label>
-                <select value={targetLang} onChange={(e) => setTargetLang(e.target.value)} className="w-full border-2 border-black p-3 rounded-xl font-bold text-sm">
-                  <option value="ko">한국어</option>
-                  <option value="en">English</option>
-                  <option value="ja">日本語</option>
-                </select>
+              <div className="border-2 border-black p-6 rounded-2xl">
+                <input
+                  type="file"
+                  accept="video/*,audio/*"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="w-full text-sm font-medium file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-black file:text-white file:text-xs file:font-bold hover:file:bg-gray-800 cursor-pointer"
+                />
+                <p className="mt-3 text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
+                  * MAX 4MB (VERCEL FREE PLAN LIMIT) · 1분 초과 시 자동 크롭
+                </p>
               </div>
             </div>
 
-            <button onClick={handleSubmit} disabled={loading} className={`w-full py-5 rounded-full font-black text-sm transition-all ${loading ? 'bg-gray-100 text-gray-400' : 'bg-black text-white shadow-xl hover:scale-105'}`}>
+            {/* 2. 저장 형식 섹션 */}
+            <div className="space-y-3">
+              <label className="text-xs font-black uppercase tracking-widest">02. Save Format</label>
+              <div className="flex gap-2">
+                {(['mp4', 'mp3'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setSaveMode(mode)}
+                    className={`flex-1 py-3 rounded-xl border-2 font-black text-xs transition-all ${
+                      saveMode === mode ? 'bg-black text-white border-black' : 'bg-white text-black border-gray-200'
+                    }`}
+                  >
+                    {mode.toUpperCase()} {mode === 'mp4' ? 'VIDEO' : 'AUDIO'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. 언어 선택 섹션 */}
+            <div className="space-y-3">
+              <label className="text-xs font-black uppercase tracking-widest">03. Target Language</label>
+              <select
+                value={targetLang}
+                onChange={(e) => setTargetLang(e.target.value)}
+                className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold outline-none bg-white appearance-none cursor-pointer"
+              >
+                <option value="ko">한국어 (Korean)</option>
+                <option value="en">영어 (English)</option>
+                <option value="ja">일본어 (Japanese)</option>
+                <option value="zh-CN">중국어 (Chinese Simplified)</option>
+                <option value="es">스페인어 (Spanish)</option>
+                <option value="fr">프랑스어 (French)</option>
+                <option value="de">독일어 (German)</option>
+                <option value="it">이탈리아어 (Italian)</option>
+                <option value="pt">포르투갈어 (Portuguese)</option>
+                <option value="ru">러시아어 (Russian)</option>
+                <option value="vi">베트남어 (Vietnamese)</option>
+                <option value="th">태국어 (Thai)</option>
+                <option value="id">인도네시아어 (Indonesian)</option>
+                <option value="hi">힌디어 (Hindi)</option>
+              </select>
+            </div>
+
+            {/* 4. 목소리 선택 섹션 */}
+            <div className="space-y-3">
+              <label className="text-xs font-black uppercase tracking-widest">04. Voice Type</label>
+              <select
+                value={voiceId}
+                onChange={(e) => setVoiceId(e.target.value)}
+                className="w-full border-2 border-black rounded-xl p-3 text-sm font-bold outline-none bg-white appearance-none cursor-pointer focus:ring-2 focus:ring-black"
+              >
+                <option value="CwhRBWXzGAHq8TQ4Fs17">Roger (남성 - 신뢰감 있는 기본 음성)</option>
+                <option value="FGY2WhTYpPnrIDTdsKH5">Lara (여성 - 활기찬)</option>
+                <option value="IKne3meq5aSn9XLyUdCD">Charlie (남성 - 차분한)</option>
+                <option value="JBFqnCBsd6RMkjVDRZzb">George (남성 - 따뜻한)</option>
+                <option value="Xb7hH8MSUJpSbSDYk0k2">Alice (여성 - 에너지 있고 활기찬)</option>
+                <option value="EXAVITQu4vr4xnSDxMaL">Sarah (여성 - 부드러운)</option>
+              </select>
+            </div>
+
+            {/* 실행 버튼 */}
+            <button
+              onClick={handleSubmit}
+              disabled={loading}
+              className={`w-full py-5 rounded-full font-black text-sm tracking-widest transition-all shadow-xl ${
+                loading ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-black text-white hover:scale-[1.02] active:scale-95'
+              }`}
+            >
               {loading ? progress.toUpperCase() : 'GENERATE DUBBING'}
             </button>
 
+            {/* 결과 표시 섹션 */}
             {resultUrl && (
-              <div className="mt-16 pt-12 border-t-2 border-black text-center space-y-6">
-                <div className="overflow-hidden rounded-2xl border-2 border-black">
-                  {saveMode === 'mp4' ? <video src={resultUrl} controls className="w-full" /> : <audio src={resultUrl} controls className="w-full p-8" />}
+              <div className="mt-16 pt-12 border-t-2 border-black text-center space-y-6 animate-in zoom-in duration-500">
+                <span className="inline-block px-4 py-1 bg-black text-white text-[10px] font-black uppercase tracking-widest rounded-full">
+                  Success
+                </span>
+                <div className="overflow-hidden rounded-2xl border-2 border-black bg-gray-50 shadow-2xl">
+                  {saveMode === 'mp4' && file?.type.startsWith('video/') ? (
+                    <video src={resultUrl} controls className="w-full" />
+                  ) : (
+                    <div className="p-8">
+                      <audio src={resultUrl} controls className="w-full" />
+                    </div>
+                  )}
                 </div>
-                <a href={resultUrl} download={`result.${saveMode}`} className="inline-block text-xs font-black border-b-2 border-black pb-1 uppercase">Download File</a>
+                <a
+                  href={resultUrl}
+                  download={`dubbed_result.${saveMode}`}
+                  className="inline-flex items-center gap-2 text-xs font-black border-b-2 border-black pb-1 hover:text-gray-500 hover:border-gray-500 transition-all uppercase tracking-tighter"
+                >
+                  Download {saveMode} File
+                </a>
               </div>
             )}
           </div>
         )}
       </div>
-      <footer className="mt-24 text-[10px] font-bold text-gray-300 uppercase tracking-widest">© 2026 AI Dubbing Lab</footer>
+
+      <footer className="mt-24 text-[10px] font-bold text-gray-300 uppercase tracking-widest">
+        &copy; 2026 AI Dubbing Lab. All rights reserved.
+      </footer>
     </main>
   );
 }
