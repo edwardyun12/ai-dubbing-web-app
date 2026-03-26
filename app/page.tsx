@@ -56,47 +56,69 @@ export default function DubbingPage() {
     ffmpegLoadedRef.current = true;
   };
 
-  const cropTo60Seconds = async (
+  // 60초 크롭 + 해상도/비트레이트 압축으로 반드시 4MB 이하로 만들기
+  const compressAndCrop = async (
     ffmpeg: FFmpeg,
     inputName: string,
     ext: string,
     originalFile: File | Blob
-  ): Promise<{ blob: Blob; warned: boolean }> => {
-    const outputName = `cropped.${ext}`;
-    setProgress("1분 크롭 중...");
+  ): Promise<Blob> => {
+    const outputName = `cropped.mp4`;
+    setProgress("영상 압축 및 크롭 중...");
+
     const result = await ffmpeg.exec([
       '-i', inputName,
-      '-t', '60',
+      '-t', '60',              // 최대 60초
+      '-vf', 'scale=640:-2',   // 가로 640px로 축소
       '-c:v', 'libx264',
+      '-crf', '28',            // 화질 압축 (값 높을수록 더 압축)
       '-c:a', 'aac',
+      '-b:a', '64k',           // 오디오 비트레이트 축소
       '-preset', 'ultrafast',
       outputName,
     ]);
+
     if (result === 0) {
       const data = await ffmpeg.readFile(outputName) as Uint8Array;
       await ffmpeg.deleteFile(outputName);
-      return {
-        blob: new Blob([data.buffer as ArrayBuffer], { type: `video/${ext}` }),
-        warned: false,
-      };
+      const blob = new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' });
+
+      // 그래도 4MB 초과면 화질을 더 낮춰서 재시도
+      if (blob.size > 4 * 1024 * 1024) {
+        setProgress("추가 압축 중...");
+        const outputName2 = `cropped2.mp4`;
+        await ffmpeg.writeFile('retry_input.mp4', await fetchFile(blob));
+        const result2 = await ffmpeg.exec([
+          '-i', 'retry_input.mp4',
+          '-vf', 'scale=480:-2',  // 더 작게
+          '-c:v', 'libx264',
+          '-crf', '32',           // 더 압축
+          '-c:a', 'aac',
+          '-b:a', '48k',
+          '-preset', 'ultrafast',
+          outputName2,
+        ]);
+        if (result2 === 0) {
+          const data2 = await ffmpeg.readFile(outputName2) as Uint8Array;
+          await ffmpeg.deleteFile(outputName2);
+          await ffmpeg.deleteFile('retry_input.mp4');
+          return new Blob([data2.buffer as ArrayBuffer], { type: 'video/mp4' });
+        }
+      }
+
+      return blob;
     }
-    console.warn("크롭 실패 → 원본 파일로 진행");
-    return {
-      blob: originalFile instanceof File
-        ? new Blob([await originalFile.arrayBuffer()], { type: originalFile.type })
-        : originalFile as Blob,
-      warned: true,
-    };
+
+    // FFmpeg 실패 시 원본 반환
+    console.warn("압축 실패 → 원본 반환");
+    return originalFile instanceof File
+      ? new Blob([await originalFile.arrayBuffer()], { type: originalFile.type })
+      : originalFile as Blob;
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
-    if (selected.size > 4 * 1024 * 1024) {
-      alert('파일이 4MB를 초과합니다.\n30초~1분 이하의 짧은 영상을 사용해주세요.');
-      e.target.value = '';
-      return;
-    }
     setFile(selected);
   };
 
@@ -113,6 +135,7 @@ export default function DubbingPage() {
     setLoading(true);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
+
     try {
       setProgress("미디어 길이 확인 중...");
       const duration = await getMediaDuration(file);
@@ -122,24 +145,26 @@ export default function DubbingPage() {
 
       let processedFile: File | Blob = file;
 
-      if (duration > 60) {
+      // 60초 초과이거나 4MB 초과면 압축 처리
+      const needsProcessing = duration > 60 || file.size > 4 * 1024 * 1024;
+
+      if (needsProcessing) {
         setProgress("파일 준비 중...");
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
+
         const inputName = `input_${file.name.replace(/[^a-zA-Z0-9.]/g, '') || 'media'}`;
         await ffmpeg.writeFile(inputName, await fetchFile(file));
-        const { blob: croppedBlob, warned } = await cropTo60Seconds(ffmpeg, inputName, ext, file);
-        processedFile = croppedBlob;
+
+        processedFile = await compressAndCrop(ffmpeg, inputName, ext, file);
+
         await ffmpeg.deleteFile(inputName);
-        if (warned) {
-          alert("⚠️ 1분 크롭에 실패하여 원본 파일을 사용합니다.\n파일이 4MB를 초과하면 서버에서 거절될 수 있습니다.");
-        }
       }
 
       setProgress("AI 음성 생성 중...");
       const formData = new FormData();
-      formData.append('file', processedFile, `media.${ext}`);
+      formData.append('file', processedFile, `media.mp4`);
       formData.append('targetLang', targetLang);
       formData.append('voiceId', voiceId);
 
@@ -170,10 +195,12 @@ export default function DubbingPage() {
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
+
         await ffmpeg.writeFile('vid', await fetchFile(processedFile));
         const inputs = ['-i', 'vid'];
         let filterComplex = '';
         const aOuts: string[] = [];
+
         for (let i = 0; i < chunks.length; i++) {
           const chunkBlob = base64ToBlob(chunks[i].audioBase64);
           const chunkName = `chunk_${i}.mp3`;
@@ -183,6 +210,7 @@ export default function DubbingPage() {
           filterComplex += `[${i + 1}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
           aOuts.push(`[a${i}]`);
         }
+
         if (chunks.length > 1) {
           filterComplex += `${aOuts.join('')}amix=inputs=${chunks.length}:normalize=0[aout]`;
           await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-c:v', 'copy', '-map', '0:v:0', '-map', '[aout]', 'out.mp4']);
@@ -190,8 +218,10 @@ export default function DubbingPage() {
           filterComplex = filterComplex.slice(0, -1);
           await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-c:v', 'copy', '-map', '0:v:0', '-map', '[a0]', 'out.mp4']);
         }
+
         const data = await ffmpeg.readFile('out.mp4') as Uint8Array;
         setResultUrl(URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: 'video/mp4' })));
+
         const cleanupFiles = ['vid', ...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp4'];
         for (const fname of cleanupFiles) { await ffmpeg.deleteFile(fname).catch(() => {}); }
 
@@ -200,9 +230,11 @@ export default function DubbingPage() {
         await loadFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg 로드 실패");
+
         const inputs: string[] = [];
         let filterComplex = '';
         const aOuts: string[] = [];
+
         for (let i = 0; i < chunks.length; i++) {
           const chunkBlob = base64ToBlob(chunks[i].audioBase64);
           const chunkName = `chunk_${i}.mp3`;
@@ -212,6 +244,7 @@ export default function DubbingPage() {
           filterComplex += `[${i}:a]adelay=${delayMs}|${delayMs}[a${i}];`;
           aOuts.push(`[a${i}]`);
         }
+
         if (chunks.length > 1) {
           filterComplex += `${aOuts.join('')}amix=inputs=${chunks.length}:normalize=0[aout]`;
           await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-map', '[aout]', 'out.mp3']);
@@ -219,8 +252,10 @@ export default function DubbingPage() {
           filterComplex = filterComplex.slice(0, -1);
           await ffmpeg.exec([...inputs, '-filter_complex', filterComplex, '-map', '[a0]', 'out.mp3']);
         }
+
         const data = await ffmpeg.readFile('out.mp3') as Uint8Array;
         setResultUrl(URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: 'audio/mpeg' })));
+
         const cleanupFiles = [...aOuts.map((_, i) => `chunk_${i}.mp3`), 'out.mp3'];
         for (const fname of cleanupFiles) { await ffmpeg.deleteFile(fname).catch(() => {}); }
       }
@@ -283,7 +318,7 @@ export default function DubbingPage() {
                   className="w-full text-sm font-medium file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-black file:text-white file:text-xs file:font-bold hover:file:bg-gray-800 cursor-pointer"
                 />
                 <p className="mt-3 text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
-                  * MAX 4MB (VERCEL FREE PLAN LIMIT) · 1분 초과 시 자동 크롭
+                  * 파일 크기 무관 · 1분 초과 시 자동 크롭 · 자동 압축 처리
                 </p>
               </div>
             </div>
