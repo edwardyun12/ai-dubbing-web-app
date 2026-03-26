@@ -21,7 +21,6 @@ export async function POST(req: NextRequest) {
     const sttFormData = new FormData();
     sttFormData.append('file', file);
     sttFormData.append('model_id', 'scribe_v1');
-    sttFormData.append('timestamps_response', 'true');
 
     const sttResponse = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
       method: 'POST',
@@ -30,74 +29,39 @@ export async function POST(req: NextRequest) {
     });
 
     if (!sttResponse.ok) throw new Error("음성 인식(STT)에 실패했습니다.");
-    const sttData = await sttResponse.json();
-    const originalText = sttData.text;
-    const words = sttData.words || [];
+    const { text: originalText } = await sttResponse.json();
 
-    // 2. 청크 분할 (1.5초 이상의 간격 기준)
-    const chunks: { text: string, start: number }[] = [];
+    // 2. 무료 번역
+    const translationRes = await translate(originalText, { to: targetLang });
+    const translatedText = translationRes.text;
+
+    // 3. ElevenLabs TTS (선택된 voiceId 사용)
+    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, { 
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        text: translatedText,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+
+    if (!ttsResponse.ok) {
+      const errorBody = await ttsResponse.json();
+      throw new Error(errorBody.detail?.status === 'quota_exceeded' ? "한도 초과" : "음성 합성 실패");
+    }
     
-    if (words.length === 0) {
-      chunks.push({ text: originalText, start: 0 });
-    } else {
-      let currentChunkText = "";
-      let currentChunkStart = words[0].start;
-      let lastWordEnd = words[0].end;
+    const dubbedAudioBuffer = await ttsResponse.arrayBuffer();
 
-      for (const w of words) {
-        if (w.type !== 'word') continue;
-
-        if (w.start - lastWordEnd > 1.5 && currentChunkText.trim().length > 0) {
-          chunks.push({ text: currentChunkText.trim(), start: currentChunkStart });
-          currentChunkStart = w.start;
-          currentChunkText = w.text;
-        } else {
-          currentChunkText += (currentChunkText ? " " : "") + w.text;
-        }
-        lastWordEnd = w.end;
-      }
-      if (currentChunkText.trim()) {
-        chunks.push({ text: currentChunkText.trim(), start: currentChunkStart });
-      }
-    }
-
-    // 3. 각 청크 번역 & TTS (무료 속도 제한을 위해 순차 직렬 처리)
-    const audioChunks: { audioBase64: string, start: number }[] = [];
-
-    for (const chunk of chunks) {
-      if (!chunk.text) continue;
-      
-      const translationRes = await translate(chunk.text, { to: targetLang });
-      const translatedText = translationRes.text;
-
-      const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, { 
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'xi-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          text: translatedText,
-          model_id: 'eleven_multilingual_v2',
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-        }),
-      });
-
-      if (!ttsResponse.ok) {
-        const errorBody = await ttsResponse.json();
-        throw new Error(errorBody.detail?.status === 'quota_exceeded' ? "한도 초과" : "음성 합성 실패");
-      }
-      
-      const dubbedAudioBuffer = await ttsResponse.arrayBuffer();
-      const base64Audio = Buffer.from(dubbedAudioBuffer).toString('base64');
-      
-      audioChunks.push({
-        audioBase64: base64Audio,
-        start: chunk.start
-      });
-    }
-
-    return NextResponse.json({ chunks: audioChunks });
+    return new NextResponse(dubbedAudioBuffer, {
+      headers: { 
+        'Content-Type': 'audio/mpeg',
+        'Content-Disposition': 'attachment; filename="dubbed.mp3"'
+      },
+    });
 
   } catch (error) {
     const message = error instanceof Error ? error.message : "알 수 없는 에러가 발생했습니다.";
